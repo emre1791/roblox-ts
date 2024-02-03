@@ -12,13 +12,13 @@ export function addIndexDiagnostics(
 	node: ts.PropertyAccessExpression | ts.ElementAccessExpression | ts.SignatureDeclarationBase | ts.PropertyName,
 	expType: ts.Type,
 ) {
-	// const symbol = getFirstDefinedSymbol(state, expType);
-	// if (
-	// 	(symbol && state.services.macroManager.getPropertyCallMacro(symbol)) ||
-	// 	(!isValidMethodIndexWithoutCall(state, skipUpwards(node)) && isMethod(state, node))
-	// ) {
-	// 	DiagnosticService.addDiagnostic(errors.noIndexWithoutCall(node));
-	// }
+	const symbol = getFirstDefinedSymbol(state, expType);
+	if (
+		(symbol && state.services.macroManager.getPropertyCallMacro(symbol)) ||
+		(!isValidMethodIndexWithoutCall(state, skipUpwards(node)) && isMethod(state, node))
+	) {
+		DiagnosticService.addDiagnostic(errors.noIndexWithoutCall(node));
+	}
 
 	if (ts.isPrototypeAccess(node)) {
 		DiagnosticService.addDiagnostic(errors.noPrototype(node));
