@@ -1,32 +1,26 @@
 import luau from "@roblox-ts/luau-ast";
 import { errors } from "Shared/diagnostics";
 import { assert } from "Shared/util/assert";
-import { SYMBOL_NAMES, TransformState } from "TSTransformer";
+import { TransformState } from "TSTransformer";
 import { DiagnosticService } from "TSTransformer/classes/DiagnosticService";
-import { transformClassConstructor } from "TSTransformer/nodes/class/transformClassConstructor";
+import {
+	transformClassConstructor,
+	transformImplicitClassConstructor,
+} from "TSTransformer/nodes/class/transformClassConstructor";
 import { transformDecorators } from "TSTransformer/nodes/class/transformDecorators";
 import { transformPropertyDeclaration } from "TSTransformer/nodes/class/transformPropertyDeclaration";
 import { transformExpression } from "TSTransformer/nodes/expressions/transformExpression";
 import { transformIdentifierDefined } from "TSTransformer/nodes/expressions/transformIdentifier";
 import { transformBlock } from "TSTransformer/nodes/statements/transformBlock";
 import { transformMethodDeclaration } from "TSTransformer/nodes/transformMethodDeclaration";
-import { convertToIndexableExpression } from "TSTransformer/util/convertToIndexableExpression";
-import { extendsRoactComponent } from "TSTransformer/util/extendsRoactComponent";
+import { findConstructor } from "TSTransformer/util/findConstructor";
 import { getExtendsNode } from "TSTransformer/util/getExtendsNode";
 import { getKindName } from "TSTransformer/util/getKindName";
-import { getOriginalSymbolOfNode } from "TSTransformer/util/getOriginalSymbolOfNode";
 import { validateIdentifier } from "TSTransformer/util/validateIdentifier";
 import { validateMethodAssignment } from "TSTransformer/util/validateMethodAssignment";
 import ts from "typescript";
 
 const MAGIC_TO_STRING_METHOD = "toString";
-
-function getConstructor(node: ts.ClassLikeDeclaration): (ts.ConstructorDeclaration & { body: ts.Block }) | undefined {
-	return node.members.find(
-		(element): element is ts.ConstructorDeclaration & { body: ts.Block } =>
-			ts.isConstructorDeclaration(element) && element.body !== undefined,
-	);
-}
 
 function createNameFunction(name: string) {
 	return luau.create(luau.SyntaxKind.FunctionExpression, {
@@ -40,67 +34,13 @@ function createNameFunction(name: string) {
 	});
 }
 
-function createRoactBoilerplate(
-	state: TransformState,
-	node: ts.ClassLikeDeclaration,
-	className: luau.Identifier | luau.TemporaryIdentifier,
-	isClassExpression: boolean,
-) {
-	const extendsNode = getExtendsNode(node);
-	assert(extendsNode);
-
-	const statements = luau.list.make<luau.Statement>();
-
-	const [extendsExp, extendsExpPrereqs] = state.capture(() => transformExpression(state, extendsNode.expression));
-	luau.list.pushList(statements, extendsExpPrereqs);
-
-	const classNameStr = luau.isIdentifier(className) ? className.name : "Anonymous";
-
-	const right = luau.create(luau.SyntaxKind.MethodCallExpression, {
-		expression: convertToIndexableExpression(extendsExp),
-		name: "extend",
-		args: luau.list.make(luau.string(classNameStr)),
-	});
-
-	if (isClassExpression && node.name) {
-		luau.list.push(
-			statements,
-			luau.create(luau.SyntaxKind.VariableDeclaration, {
-				left: transformIdentifierDefined(state, node.name),
-				right,
-			}),
-		);
-	} else {
-		luau.list.push(
-			statements,
-			luau.create(luau.SyntaxKind.Assignment, {
-				left: className,
-				operator: "=",
-				right,
-			}),
-		);
-	}
-
-	return statements;
-}
-
-function getExtendsDeclaration(state: TransformState, extendsExp: ts.Expression) {
-	if (ts.isClassLike(extendsExp)) {
-		return extendsExp;
-	}
-	const symbol = state.typeChecker.getSymbolAtLocation(extendsExp);
-	if (symbol && symbol.valueDeclaration && ts.isClassLike(symbol.valueDeclaration)) {
-		return symbol.valueDeclaration;
-	}
-}
-
 function createBoilerplate(
 	state: TransformState,
 	node: ts.ClassLikeDeclaration,
 	className: luau.Identifier | luau.TemporaryIdentifier,
 	isClassExpression: boolean,
 ) {
-	const isAbstract = !!ts.getSelectedSyntacticModifierFlags(node, ts.ModifierFlags.Abstract);
+	const isAbstract = ts.hasAbstractModifier(node);
 	const statements = luau.list.make<luau.Statement>();
 
 	/* boilerplate:
@@ -131,7 +71,7 @@ function createBoilerplate(
 			luau.create(luau.SyntaxKind.Assignment, {
 				left: className,
 				operator: "=",
-				right: luau.mixedTable(),
+				right: luau.map(),
 			}),
 		);
 	} else {
@@ -145,11 +85,6 @@ function createBoilerplate(
 		);
 
 		if (extendsNode) {
-			const extendsDec = getExtendsDeclaration(state, extendsNode.expression);
-			if (extendsDec && extendsRoactComponent(state, extendsDec)) {
-				DiagnosticService.addDiagnostic(errors.noRoactInheritance(node));
-			}
-
 			const [extendsExp, extendsExpPrereqs] = state.capture(() =>
 				transformExpression(state, extendsNode.expression),
 			);
@@ -252,25 +187,6 @@ function createBoilerplate(
 	return statements;
 }
 
-function extendsMacroClass(state: TransformState, node: ts.ClassLikeDeclaration) {
-	const extendsNode = getExtendsNode(node);
-	if (extendsNode) {
-		const symbol = getOriginalSymbolOfNode(state.typeChecker, extendsNode.expression);
-		if (symbol) {
-			return (
-				symbol === state.services.macroManager.getSymbolOrThrow(SYMBOL_NAMES.ArrayConstructor) ||
-				symbol === state.services.macroManager.getSymbolOrThrow(SYMBOL_NAMES.SetConstructor) ||
-				symbol === state.services.macroManager.getSymbolOrThrow(SYMBOL_NAMES.MapConstructor) ||
-				symbol === state.services.macroManager.getSymbolOrThrow(SYMBOL_NAMES.WeakSetConstructor) ||
-				symbol === state.services.macroManager.getSymbolOrThrow(SYMBOL_NAMES.WeakMapConstructor) ||
-				symbol === state.services.macroManager.getSymbolOrThrow(SYMBOL_NAMES.ReadonlyMapConstructor) ||
-				symbol === state.services.macroManager.getSymbolOrThrow(SYMBOL_NAMES.ReadonlySetConstructor)
-			);
-		}
-	}
-	return false;
-}
-
 function isClassHoisted(state: TransformState, node: ts.ClassLikeDeclaration) {
 	if (node.name) {
 		const symbol = state.typeChecker.getSymbolAtLocation(node.name);
@@ -284,7 +200,7 @@ export function transformClassLikeDeclaration(state: TransformState, node: ts.Cl
 	const isClassExpression = ts.isClassExpression(node);
 	const statements = luau.list.make<luau.Statement>();
 
-	const isExportDefault = !!ts.getSelectedSyntacticModifierFlags(node, ts.ModifierFlags.ExportDefault);
+	const isExportDefault = ts.hasSyntacticModifier(node, ts.ModifierFlags.ExportDefault);
 
 	if (node.name) {
 		validateIdentifier(state, node.name);
@@ -313,7 +229,7 @@ export function transformClassLikeDeclaration(state: TransformState, node: ts.Cl
 
 	let internalName: luau.Identifier | luau.TemporaryIdentifier;
 	if (shouldUseInternalName) {
-		internalName = node.name ? transformIdentifierDefined(state, node.name) : luau.tempId("class");
+		internalName = transformIdentifierDefined(state, node.name);
 	} else {
 		internalName = returnVar;
 	}
@@ -328,28 +244,22 @@ export function transformClassLikeDeclaration(state: TransformState, node: ts.Cl
 		);
 	}
 
-	if (extendsMacroClass(state, node)) {
-		DiagnosticService.addDiagnostic(errors.noMacroExtends(node));
-	}
-
-	const isRoact = extendsRoactComponent(state, node);
-
 	// OOP boilerplate + class functions
 	const statementsInner = luau.list.make<luau.Statement>();
-	if (isRoact) {
-		luau.list.pushList(statementsInner, createRoactBoilerplate(state, node, internalName, isClassExpression));
-	} else {
-		luau.list.pushList(statementsInner, createBoilerplate(state, node, internalName, isClassExpression));
-	}
+	luau.list.pushList(statementsInner, createBoilerplate(state, node, internalName, isClassExpression));
 
-	luau.list.pushList(statementsInner, transformClassConstructor(state, node, internalName, getConstructor(node)));
+	const constructor = findConstructor(node);
+	if (constructor) {
+		luau.list.pushList(statementsInner, transformClassConstructor(state, constructor, internalName));
+	} else {
+		luau.list.pushList(statementsInner, transformImplicitClassConstructor(state, node, internalName));
+	}
 
 	for (const member of node.members) {
 		if (
 			(ts.isPropertyDeclaration(member) || ts.isMethodDeclaration(member)) &&
 			(ts.isIdentifier(member.name) || ts.isStringLiteral(member.name)) &&
-			(luau.isReservedClassField(member.name.text) ||
-				(isRoact && luau.isReservedRoactClassField(member.name.text)))
+			luau.isReservedClassField(member.name.text)
 		) {
 			DiagnosticService.addDiagnostic(errors.noReservedClassFields(member.name));
 		}
@@ -397,7 +307,7 @@ export function transformClassLikeDeclaration(state: TransformState, node: ts.Cl
 				DiagnosticService.addDiagnostic(errors.noClassMetamethods(method.name));
 			}
 
-			if (!!ts.getSelectedSyntacticModifierFlags(method, ts.ModifierFlags.Static)) {
+			if (ts.hasStaticModifier(method)) {
 				if (instanceType.getProperty(method.name.text) !== undefined) {
 					DiagnosticService.addDiagnostic(errors.noInstanceMethodCollisions(method));
 				}
@@ -408,10 +318,11 @@ export function transformClassLikeDeclaration(state: TransformState, node: ts.Cl
 			}
 		}
 
-		luau.list.pushList(
-			statementsInner,
+		const [statements, prereqs] = state.capture(() =>
 			transformMethodDeclaration(state, method, { name: "name", value: internalName }),
 		);
+		luau.list.pushList(statementsInner, prereqs);
+		luau.list.pushList(statementsInner, statements);
 	}
 
 	const toStringProperty = instanceType.getProperty(MAGIC_TO_STRING_METHOD);
@@ -440,7 +351,11 @@ export function transformClassLikeDeclaration(state: TransformState, node: ts.Cl
 		if (ts.isClassStaticBlockDeclaration(declaration)) {
 			luau.list.pushList(statementsInner, transformBlock(state, declaration.body));
 		} else {
-			luau.list.pushList(statementsInner, transformPropertyDeclaration(state, declaration, internalName));
+			const [statements, prereqs] = state.capture(() =>
+				transformPropertyDeclaration(state, declaration, internalName),
+			);
+			luau.list.pushList(statementsInner, prereqs);
+			luau.list.pushList(statementsInner, statements);
 		}
 	}
 

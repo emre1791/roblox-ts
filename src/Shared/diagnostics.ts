@@ -2,26 +2,19 @@ import { RbxPath } from "@roblox-ts/rojo-resolver";
 import kleur from "kleur";
 import { SourceFileWithTextRange } from "Shared/types";
 import { createDiagnosticWithLocation } from "Shared/util/createDiagnosticWithLocation";
+import { issue } from "Shared/util/createGithubLink";
 import { createTextDiagnostic } from "Shared/util/createTextDiagnostic";
 import ts from "typescript";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type DiagnosticFactory<T extends Array<any> = []> = {
+export type DiagnosticFactory<T extends Array<unknown> = []> = {
 	(node: ts.Node | SourceFileWithTextRange, ...context: T): ts.DiagnosticWithLocation;
 	id: number;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DiagnosticContextFormatter<T extends Array<any> = []> = (...context: T) => Array<string | false>;
-
-const REPO_URL = "https://github.com/roblox-ts/roblox-ts";
+type DiagnosticContextFormatter<T extends Array<unknown> = []> = (...context: T) => Array<string | false>;
 
 function suggestion(text: string) {
 	return "Suggestion: " + kleur.yellow(text);
-}
-
-function issue(id: number) {
-	return "More information: " + kleur.grey(`${REPO_URL}/issues/${id}`);
 }
 
 let id = 0;
@@ -42,14 +35,16 @@ function diagnostic(category: ts.DiagnosticCategory, ...messages: Array<string |
  * formatted messages are displayed last in the diagnostic report.
  * @param messages The list of messages to include in the diagnostic report.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function diagnosticWithContext<T extends Array<any> = []>(
+function diagnosticWithContext<T extends Array<unknown> = []>(
 	category: ts.DiagnosticCategory,
 	contextFormatter?: DiagnosticContextFormatter<T>,
 	...messages: Array<string | false>
 ): DiagnosticFactory<T> {
 	const result = (node: ts.Node | SourceFileWithTextRange, ...context: T) => {
-		if (category === ts.DiagnosticCategory.Error) {
+		if (
+			category === ts.DiagnosticCategory.Error &&
+			process.env.ROBLOX_TS_EXPECTED_DIAGNOSTIC_ID !== String(result.id)
+		) {
 			debugger;
 		}
 
@@ -71,8 +66,7 @@ function error(...messages: Array<string | false>): DiagnosticFactory {
 	return diagnostic(ts.DiagnosticCategory.Error, ...messages);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function errorWithContext<T extends Array<any> = []>(
+function errorWithContext<T extends Array<unknown> = []>(
 	contextFormatter: DiagnosticContextFormatter<T>,
 	...messages: Array<string | false>
 ): DiagnosticFactory<T> {
@@ -92,8 +86,8 @@ function warningText(...messages: Array<string>) {
 }
 
 export function getDiagnosticId(diagnostic: ts.Diagnostic): number {
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	return (diagnostic as any).id;
+	// id is added in createDiagnosticWithLocation
+	return (diagnostic as unknown as { id: number }).id;
 }
 
 /**
@@ -138,7 +132,6 @@ export const errors = {
 	noExclamationEquals: error("operator `!=` is not supported!", suggestion("Use `!==` instead.")),
 	noEnumMerging: error("Enum merging is not supported!"),
 	noNamespaceMerging: error("Namespace merging is not supported!"),
-	noSpreadDestructuring: error("Operator `...` is not supported for destructuring!"),
 	noFunctionExpressionName: error("Function expression names are not supported!"),
 	noPrecedingSpreadElement: error("Spread element must come last in a list of arguments!"),
 	noLuaTupleDestructureAssignmentExpression: error(
@@ -148,11 +141,12 @@ export const errors = {
 	noGlobalThis: error("`globalThis` is not supported!"),
 	noArguments: error("`arguments` is not supported!"),
 	noPrototype: error("`prototype` is not supported!"),
-	noSuperProperty: error("super properties are not supported!"),
 	noRobloxSymbolInstanceof: error(
 		"The `instanceof` operator can only be used on roblox-ts classes!",
 		suggestion('Use `typeIs(myThing, "TypeToCheck") instead'),
 	),
+	noNestedSpreadsInAssignmentPatterns: error("Nesting spreads in assignment patterns is not supported!"),
+	noRestSpreadingOfRobloxTypes: error("Operator `...` is not allowed on Roblox types!"),
 	noNonNumberStringRelationOperator: error("Relation operators can only be used on number or string types!"),
 	noInstanceMethodCollisions: error("Static methods cannot use the same name as instance methods!"),
 	noStaticMethodCollisions: error("Instance methods cannot use the same name as static methods!"),
@@ -162,10 +156,6 @@ export const errors = {
 	noAsyncGeneratorFunctions: error("Async generator functions are not supported!"),
 	noNonStringModuleSpecifier: error("Module specifiers must be a string literal."),
 	noIterableIteration: error("Iterating on Iterable<T> is not supported! You must use a more specific type."),
-	noLuaTupleInTemplateExpression: error(
-		"Can't use LuaTuple<T> in a template literal expression!",
-		suggestion("Did you mean to add `[0]`?"),
-	),
 	noMixedTypeCall: error(
 		"Attempted to call a function with mixed types! All definitions must either be a method or a callback.",
 	),
@@ -185,13 +175,16 @@ export const errors = {
 		suggestion("Macros always exist. Use a normal call."),
 	),
 	noConstructorMacroWithoutNew: error("Cannot index a constructor macro without using the `new` operator!"),
-	noMacroExtends: error("Cannot extend from a macro class!"),
+	noMacroExtends: error(
+		"Cannot extend from a macro class!",
+		suggestion("Store an instance of the macro class in a property."),
+	),
 	noMacroUnion: error("Macro cannot be applied to a union type!"),
 	noMacroObjectSpread: error(
 		"Macro classes cannot be used in an object spread!",
 		suggestion("Did you mean to use an array spread? `[ ...exp ]`"),
 	),
-	noVarArgsMacroSpread: error("Macros which use variadric arguments do not support spread expressions!", issue(1149)),
+	noVarArgsMacroSpread: error("Macros which use variadic arguments do not support spread expressions!", issue(1149)),
 	noRangeMacroOutsideForOf: error("$range() macro is only valid as an expression of a for-of loop!"),
 	noTupleMacroOutsideReturn: error("$tuple() macro is only valid as an expression of a return statement!"),
 
@@ -206,18 +199,8 @@ export const errors = {
 		suggestion("Move the file you want to import to a shared location."),
 	),
 
-	// roact jsx
-	invalidJsxFactory: error("compilerOptions.jsxFactory must be `Roact.createElement`!"),
-	invalidJsxFragmentFactory: error("compilerOptions.jsxFragmentFactory must be `Roact.createFragment`!"),
-	noRoactInheritance: error(
-		"Composition is preferred over inheritance with Roact components.",
-		"More info: https://reactjs.org/docs/composition-vs-inheritance.html",
-	),
-	noSuperPropertyCallRoactComponent: error("`super` is not supported inside Roact components!"),
-	missingSuperConstructorRoactComponent: error(
-		"`super(props)` must be the first statement of the constructor in a Roact component!",
-	),
-	noJsxText: error("JSX text is not supported!"),
+	// jsx
+	noPrecedingJsxSpreadElement: error("JSX spread expression must come last in children!"),
 
 	// semantic
 	expectedMethodGotFunction: error("Attempted to assign non-method where method was expected."),

@@ -1,11 +1,12 @@
 import luau, { render, RenderState, renderStatements, solveTempIds } from "@roblox-ts/luau-ast";
+import { PathTranslator } from "@roblox-ts/path-translator";
 import { RbxPath, RbxPathParent, RojoResolver } from "@roblox-ts/rojo-resolver";
 import path from "path";
-import { PathTranslator } from "Shared/classes/PathTranslator";
 import { PARENT_FIELD, ProjectType } from "Shared/constants";
 import { errors, warnings } from "Shared/diagnostics";
 import { ProjectData } from "Shared/types";
 import { assert } from "Shared/util/assert";
+import { getCanonicalFileName } from "Shared/util/getCanonicalFileName";
 import { getOrSetDefault } from "Shared/util/getOrSetDefault";
 import { MultiTransformState } from "TSTransformer";
 import { DiagnosticService } from "TSTransformer/classes/DiagnosticService";
@@ -51,7 +52,6 @@ export class TransformState {
 		public readonly rojoResolver: RojoResolver,
 		public readonly pkgRojoResolvers: Array<RojoResolver>,
 		public readonly nodeModulesPathMapping: Map<string, string>,
-		public readonly reverseSymlinkMap: Map<string, string>,
 		public readonly runtimeLibRbxPath: RbxPath | undefined,
 		public readonly typeChecker: ts.TypeChecker,
 		public readonly projectType: ProjectType,
@@ -365,25 +365,31 @@ export class TransformState {
 
 	/** attempts to reverse symlink lookup */
 	public guessVirtualPath(fsPath: string) {
+		const reverseSymlinkMap = this.program.getSymlinkCache?.().getSymlinkedDirectoriesByRealpath();
+		if (!reverseSymlinkMap) return;
+
 		const original = fsPath;
 		while (true) {
-			const parent = path.dirname(fsPath);
+			// reverseSymlinkMap always has trailing slashes
+			// as it is constructed from `SymlinkedDirectory.real`
+			const parent = ts.ensureTrailingDirectorySeparator(path.dirname(fsPath));
 			if (fsPath === parent) break;
 			fsPath = parent;
-			const symlink = this.reverseSymlinkMap.get(fsPath);
+			const symlink = reverseSymlinkMap.get(
+				ts.toPath(fsPath, this.program.getCurrentDirectory(), getCanonicalFileName),
+			)?.[0];
 			if (symlink) {
 				return path.join(symlink, path.relative(fsPath, original));
 			}
 		}
-		return original;
 	}
 
 	public symbolToIdMap = new Map<ts.Symbol, luau.TemporaryIdentifier>();
 
 	// stores a mapping of `key` in `obj[key] = value` for classes so that the `key` can be referred to later
-	private classElementToObjectKeyMap = new Map<ts.ClassElement, luau.AnyIdentifier>();
+	private classElementToObjectKeyMap = new Map<ts.ClassElement, luau.SimpleTypes>();
 
-	public setClassElementObjectKey(classElement: ts.ClassElement, identifier: luau.AnyIdentifier) {
+	public setClassElementObjectKey(classElement: ts.ClassElement, identifier: luau.SimpleTypes) {
 		assert(!this.classElementToObjectKeyMap.has(classElement));
 		this.classElementToObjectKeyMap.set(classElement, identifier);
 	}

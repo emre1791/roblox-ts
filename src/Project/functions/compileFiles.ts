@@ -1,18 +1,18 @@
 import { renderAST } from "@roblox-ts/luau-ast";
+import { PathTranslator } from "@roblox-ts/path-translator";
 import { NetworkType, RbxPath, RojoResolver } from "@roblox-ts/rojo-resolver";
 import fs from "fs-extra";
 import path from "path";
 import { checkFileName } from "Project/functions/checkFileName";
 import { checkRojoConfig } from "Project/functions/checkRojoConfig";
 import { createNodeModulesPathMapping } from "Project/functions/createNodeModulesPathMapping";
-import { transformPaths } from "Project/transformers/builtin/transformPaths";
+import transformPathsTransformer from "Project/transformers/builtin/transformPaths";
 import { transformTypeReferenceDirectives } from "Project/transformers/builtin/transformTypeReferenceDirectives";
 import { createTransformerList, flattenIntoTransformers } from "Project/transformers/createTransformerList";
 import { createTransformerWatcher } from "Project/transformers/createTransformerWatcher";
 import { getPluginConfigs } from "Project/transformers/getPluginConfigs";
 import { getCustomPreEmitDiagnostics } from "Project/util/getCustomPreEmitDiagnostics";
 import { LogService } from "Shared/classes/LogService";
-import { PathTranslator } from "Shared/classes/PathTranslator";
 import { ProjectType } from "Shared/constants";
 import { ProjectData } from "Shared/types";
 import { assert } from "Shared/util/assert";
@@ -36,24 +36,9 @@ function inferProjectType(data: ProjectData, rojoResolver: RojoResolver): Projec
 
 function emitResultFailure(messageText: string): ts.EmitResult {
 	return {
-		emitSkipped: false,
+		emitSkipped: true,
 		diagnostics: [createTextDiagnostic(messageText)],
 	};
-}
-
-function getReverseSymlinkMap(program: ts.Program) {
-	const result = new Map<string, string>();
-
-	const directoriesMap = program.getSymlinkCache?.()?.getSymlinkedDirectories();
-	if (directoriesMap) {
-		directoriesMap.forEach((dir, fsPath) => {
-			if (typeof dir !== "boolean") {
-				result.set(dir.real, fsPath);
-			}
-		});
-	}
-
-	return result;
 }
 
 /**
@@ -91,8 +76,6 @@ export function compileFiles(
 
 	const pkgRojoResolvers = compilerOptions.typeRoots!.map(RojoResolver.synthetic);
 	const nodeModulesPathMapping = createNodeModulesPathMapping(compilerOptions.typeRoots!);
-
-	const reverseSymlinkMap = getReverseSymlinkMap(program);
 
 	const projectType = data.projectOptions.type ?? inferProjectType(data, rojoResolver);
 
@@ -163,7 +146,7 @@ export function compileFiles(
 	if (DiagnosticService.hasErrors()) return { emitSkipped: true, diagnostics: DiagnosticService.flush() };
 
 	const typeChecker = proxyProgram.getTypeChecker();
-	const services = createTransformServices(proxyProgram, typeChecker, data);
+	const services = createTransformServices(typeChecker);
 
 	for (let i = 0; i < sourceFiles.length; i++) {
 		const sourceFile = proxyProgram.getSourceFile(sourceFiles[i].fileName);
@@ -184,7 +167,6 @@ export function compileFiles(
 				rojoResolver,
 				pkgRojoResolvers,
 				nodeModulesPathMapping,
-				reverseSymlinkMap,
 				runtimeLibRbxPath,
 				typeChecker,
 				projectType,
@@ -205,6 +187,9 @@ export function compileFiles(
 	const emittedFiles = new Array<string>();
 	if (fileWriteQueue.length > 0) {
 		benchmarkIfVerbose("writing compiled files", () => {
+			const afterDeclarations = compilerOptions.declaration
+				? [transformTypeReferenceDirectives, transformPathsTransformer(program, {})]
+				: undefined;
 			for (const { sourceFile, source } of fileWriteQueue) {
 				const outPath = pathTranslator.getOutputPath(sourceFile.fileName);
 				if (
@@ -216,9 +201,7 @@ export function compileFiles(
 					emittedFiles.push(outPath);
 				}
 				if (compilerOptions.declaration) {
-					proxyProgram.emit(sourceFile, ts.sys.writeFile, undefined, true, {
-						afterDeclarations: [transformTypeReferenceDirectives, transformPaths],
-					});
+					proxyProgram.emit(sourceFile, ts.sys.writeFile, undefined, true, { afterDeclarations });
 				}
 			}
 		});

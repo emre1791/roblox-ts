@@ -129,6 +129,7 @@ export = () => {
 		expect(arr[3]).to.equal(undefined);
 
 		expect([1, 2].push()).to.equal(2);
+		expect([1, 2, 3].push(4, 5, 6)).to.equal(6);
 	});
 
 	it("should support pop", () => {
@@ -452,50 +453,50 @@ export = () => {
 		type StaticArguments<T> = T extends [TypeGuard<infer A>]
 			? [A]
 			: T extends [TypeGuard<infer A>, TypeGuard<infer B>]
-			? [A, B]
-			: T extends [TypeGuard<infer A>, TypeGuard<infer B>, TypeGuard<infer C>]
-			? [A, B, C]
-			: T extends [TypeGuard<infer A>, TypeGuard<infer B>, TypeGuard<infer C>, TypeGuard<infer D>]
-			? [A, B, C, D]
-			: T extends [
-					TypeGuard<infer A>,
-					TypeGuard<infer B>,
-					TypeGuard<infer C>,
-					TypeGuard<infer D>,
-					TypeGuard<infer E>,
-			  ]
-			? [A, B, C, D, E]
-			: T extends [
-					TypeGuard<infer A>,
-					TypeGuard<infer B>,
-					TypeGuard<infer C>,
-					TypeGuard<infer D>,
-					TypeGuard<infer E>,
-					TypeGuard<infer F>,
-			  ]
-			? [A, B, C, D, E, F]
-			: T extends [
-					TypeGuard<infer A>,
-					TypeGuard<infer B>,
-					TypeGuard<infer C>,
-					TypeGuard<infer D>,
-					TypeGuard<infer E>,
-					TypeGuard<infer F>,
-					TypeGuard<infer G>,
-			  ]
-			? [A, B, C, D, E, F, G]
-			: T extends [
-					TypeGuard<infer A>,
-					TypeGuard<infer B>,
-					TypeGuard<infer C>,
-					TypeGuard<infer D>,
-					TypeGuard<infer E>,
-					TypeGuard<infer F>,
-					TypeGuard<infer G>,
-					TypeGuard<infer H>,
-			  ]
-			? [A, B, C, D, E, F, G, H]
-			: Array<unknown>; // default, if user has more than 8 args then wtf they doing with their lives?!?
+				? [A, B]
+				: T extends [TypeGuard<infer A>, TypeGuard<infer B>, TypeGuard<infer C>]
+					? [A, B, C]
+					: T extends [TypeGuard<infer A>, TypeGuard<infer B>, TypeGuard<infer C>, TypeGuard<infer D>]
+						? [A, B, C, D]
+						: T extends [
+									TypeGuard<infer A>,
+									TypeGuard<infer B>,
+									TypeGuard<infer C>,
+									TypeGuard<infer D>,
+									TypeGuard<infer E>,
+							  ]
+							? [A, B, C, D, E]
+							: T extends [
+										TypeGuard<infer A>,
+										TypeGuard<infer B>,
+										TypeGuard<infer C>,
+										TypeGuard<infer D>,
+										TypeGuard<infer E>,
+										TypeGuard<infer F>,
+								  ]
+								? [A, B, C, D, E, F]
+								: T extends [
+											TypeGuard<infer A>,
+											TypeGuard<infer B>,
+											TypeGuard<infer C>,
+											TypeGuard<infer D>,
+											TypeGuard<infer E>,
+											TypeGuard<infer F>,
+											TypeGuard<infer G>,
+									  ]
+									? [A, B, C, D, E, F, G]
+									: T extends [
+												TypeGuard<infer A>,
+												TypeGuard<infer B>,
+												TypeGuard<infer C>,
+												TypeGuard<infer D>,
+												TypeGuard<infer E>,
+												TypeGuard<infer F>,
+												TypeGuard<infer G>,
+												TypeGuard<infer H>,
+										  ]
+										? [A, B, C, D, E, F, G, H]
+										: Array<unknown>; // default, if user has more than 8 args then wtf they doing with their lives?!?
 
 		function f<C extends Array<unknown>>(arr: StaticArguments<C>) {
 			return [...arr];
@@ -529,5 +530,38 @@ export = () => {
 			expect(safeArgs[2]).to.equal("C");
 		}
 		foo(undefined, "A", undefined, "B", undefined, "C", undefined);
+	});
+
+	// this test covers an optimization in offset()
+	it("should support indexing with binary expressions", () => {
+		const arr = [1, 2, 3];
+		expect(arr[arr.size() - 1]).to.equal(3);
+		expect(arr[arr.size() - 2]).to.equal(2);
+		expect(arr[arr.size() - 3]).to.equal(1);
+		expect(arr[arr.size() + -1]).to.equal(3);
+		expect(arr[arr.size() + -2]).to.equal(2);
+		expect(arr[arr.size() + -3]).to.equal(1);
+
+		const zero = 0;
+		expect(arr[zero + 0]).to.equal(1);
+		expect(arr[zero + 1]).to.equal(2);
+		expect(arr[zero + 2]).to.equal(3);
+		expect(arr[zero - -0]).to.equal(1);
+		expect(arr[zero - -1]).to.equal(2);
+		expect(arr[zero - -2]).to.equal(3);
+
+		expect(arr[zero + 0.1 - 0.1]).to.equal(1);
+		expect(arr[zero + 1.1 - 0.1]).to.equal(2);
+		expect(arr[zero + 2.1 - 0.1]).to.equal(3);
+		expect(arr[arr.size() - 1.1 + 0.1]).to.equal(3);
+		expect(arr[arr.size() - 2.1 + 0.1]).to.equal(2);
+		expect(arr[arr.size() - 3.1 + 0.1]).to.equal(1);
+
+		expect(arr[zero - -0.1 + -0.1]).to.equal(1);
+		expect(arr[zero - -1.1 + -0.1]).to.equal(2);
+		expect(arr[zero - -2.1 + -0.1]).to.equal(3);
+		expect(arr[arr.size() + -1.1 - -0.1]).to.equal(3);
+		expect(arr[arr.size() + -2.1 - -0.1]).to.equal(2);
+		expect(arr[arr.size() + -3.1 - -0.1]).to.equal(1);
 	});
 };

@@ -15,9 +15,11 @@ import { transformElementAccessExpression } from "TSTransformer/nodes/expression
 import { transformFunctionExpression } from "TSTransformer/nodes/expressions/transformFunctionExpression";
 import { transformIdentifier } from "TSTransformer/nodes/expressions/transformIdentifier";
 import { transformJsxElement } from "TSTransformer/nodes/expressions/transformJsxElement";
+import { transformJsxExpression } from "TSTransformer/nodes/expressions/transformJsxExpression";
 import { transformJsxFragment } from "TSTransformer/nodes/expressions/transformJsxFragment";
 import { transformJsxSelfClosingElement } from "TSTransformer/nodes/expressions/transformJsxSelfClosingElement";
 import { transformNewExpression } from "TSTransformer/nodes/expressions/transformNewExpression";
+import { transformNoSubstitutionTemplateLiteral } from "TSTransformer/nodes/expressions/transformNoSubstitutionTemplateLiteral";
 import { transformNumericLiteral } from "TSTransformer/nodes/expressions/transformNumericLiteral";
 import { transformObjectLiteralExpression } from "TSTransformer/nodes/expressions/transformObjectLiteralExpression";
 import { transformOmittedExpression } from "TSTransformer/nodes/expressions/transformOmittedExpression";
@@ -46,10 +48,26 @@ const DIAGNOSTIC = (factory: DiagnosticFactory) => (state: TransformState, node:
 	return NO_EMIT();
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ExpressionTransformer = (state: TransformState, node: any) => luau.Expression;
+type Validate<T> = {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- typecheck only works with `any`
+	[k in keyof T]: T[k] extends [infer Kind, infer C extends (...args: any) => unknown]
+		? "kind" extends keyof Parameters<C>[1]
+			? Kind extends Parameters<C>[1]["kind"]
+				? T[k]
+				: never
+			: T[k]
+		: never;
+};
 
-const TRANSFORMER_BY_KIND = new Map<ts.SyntaxKind, ExpressionTransformer>([
+function createTransformerMap<
+	T extends Array<
+		[ts.SyntaxKind, { bivariant(state: TransformState, exp: ts.Expression): luau.Expression }["bivariant"]]
+	>,
+>(values: Validate<[...T]>): Map<ts.SyntaxKind, (state: TransformState, exp: ts.Expression) => luau.Expression> {
+	return new Map(values);
+}
+
+const TRANSFORMER_BY_KIND = createTransformerMap([
 	// banned expressions
 	[ts.SyntaxKind.BigIntLiteral, DIAGNOSTIC(errors.noBigInt)],
 	[ts.SyntaxKind.NullKeyword, DIAGNOSTIC(errors.noNullLiteral)],
@@ -76,11 +94,12 @@ const TRANSFORMER_BY_KIND = new Map<ts.SyntaxKind, ExpressionTransformer>([
 	[ts.SyntaxKind.FunctionExpression, transformFunctionExpression],
 	[ts.SyntaxKind.Identifier, transformIdentifier],
 	[ts.SyntaxKind.JsxElement, transformJsxElement],
+	[ts.SyntaxKind.JsxExpression, transformJsxExpression],
 	[ts.SyntaxKind.JsxFragment, transformJsxFragment],
 	[ts.SyntaxKind.JsxSelfClosingElement, transformJsxSelfClosingElement],
 	[ts.SyntaxKind.NewExpression, transformNewExpression],
 	[ts.SyntaxKind.NonNullExpression, transformTypeExpression],
-	[ts.SyntaxKind.NoSubstitutionTemplateLiteral, transformStringLiteral],
+	[ts.SyntaxKind.NoSubstitutionTemplateLiteral, transformNoSubstitutionTemplateLiteral],
 	[ts.SyntaxKind.NumericLiteral, transformNumericLiteral],
 	[ts.SyntaxKind.ObjectLiteralExpression, transformObjectLiteralExpression],
 	[ts.SyntaxKind.OmittedExpression, transformOmittedExpression],

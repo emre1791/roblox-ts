@@ -1,4 +1,5 @@
-import chokidar from "chokidar";
+import { PathTranslator } from "@roblox-ts/path-translator";
+import chokidar, { ChokidarOptions } from "chokidar";
 import fs from "fs-extra";
 import { ProjectData } from "Project";
 import { checkFileName } from "Project/functions/checkFileName";
@@ -14,19 +15,18 @@ import { getParsedCommandLine } from "Project/functions/getParsedCommandLine";
 import { tryRemoveOutput } from "Project/functions/tryRemoveOutput";
 import { isCompilableFile } from "Project/util/isCompilableFile";
 import { walkDirectorySync } from "Project/util/walkDirectorySync";
-import { PathTranslator } from "Shared/classes/PathTranslator";
+import { DTS_EXT } from "Shared/constants";
 import { DiagnosticError } from "Shared/errors/DiagnosticError";
 import { assert } from "Shared/util/assert";
 import { getRootDirs } from "Shared/util/getRootDirs";
 import ts from "typescript";
 
-const CHOKIDAR_OPTIONS: chokidar.WatchOptions = {
+const CHOKIDAR_OPTIONS: ChokidarOptions = {
 	awaitWriteFinish: {
 		pollInterval: 10,
 		stabilityThreshold: 50,
 	},
 	ignoreInitial: true,
-	disableGlobbing: true,
 };
 
 function fixSlashes(fsPath: string) {
@@ -74,7 +74,7 @@ export function setupProjectWatchProgram(data: ProjectData, usePolling: boolean)
 	const createProgram = createProgramFactory(data, options);
 	function refreshProgram() {
 		program = createProgram([...fileNamesSet], options);
-		pathTranslator = createPathTranslator(program);
+		pathTranslator = createPathTranslator(program, data);
 	}
 
 	function runInitialCompile() {
@@ -119,13 +119,15 @@ export function setupProjectWatchProgram(data: ProjectData, usePolling: boolean)
 			} else {
 				// Transformers use a separate program that must be updated separately (which is done in compileFiles),
 				// however certain files (such as d.ts files) aren't passed to that function and must be updated here.
-				const transformerWatcher = data.transformerWatcher;
-				if (transformerWatcher) {
-					// Using ts.sys.readFile instead of fs.readFileSync here as it performs some utf conversions implicitly
-					// and is also used by the program host to read files.
-					const contents = ts.sys.readFile(fsPath);
-					if (contents) {
-						transformerWatcher.updateFile(fsPath, contents);
+				if (fsPath.endsWith(DTS_EXT)) {
+					const transformerWatcher = data.transformerWatcher;
+					if (transformerWatcher) {
+						// Using ts.sys.readFile instead of fs.readFileSync here as it performs some utf conversions implicitly
+						// and is also used by the program host to read files.
+						const contents = ts.sys.readFile(fsPath);
+						if (contents) {
+							transformerWatcher.updateFile(fsPath, contents);
+						}
 					}
 				}
 
@@ -217,7 +219,7 @@ export function setupProjectWatchProgram(data: ProjectData, usePolling: boolean)
 		openEventCollection();
 	}
 
-	const chokidarOptions: chokidar.WatchOptions = { ...CHOKIDAR_OPTIONS, usePolling };
+	const chokidarOptions: ChokidarOptions = { ...CHOKIDAR_OPTIONS, usePolling };
 
 	chokidar
 		.watch(getRootDirs(options), chokidarOptions)

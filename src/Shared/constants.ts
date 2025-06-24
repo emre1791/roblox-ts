@@ -5,7 +5,7 @@ export const PACKAGE_ROOT = path.join(__dirname, "..", "..");
 export const INCLUDE_PATH = path.join(PACKAGE_ROOT, "include");
 
 // intentionally not using PACKAGE_ROOT because playground has webpack issues
-// eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- can't use an import because it's outside the project
 export const COMPILER_VERSION: string = require("../../package.json").version;
 
 export const NODE_MODULES = "node_modules";
@@ -15,9 +15,6 @@ export const TS_EXT = ".ts";
 export const TSX_EXT = ".tsx";
 export const D_EXT = ".d";
 export const DTS_EXT = D_EXT + TS_EXT;
-export const TRANSFORMED_EXT = ".transformed";
-export const LUA_EXT = ".lua";
-export const JSON_EXT = ".json";
 
 export const INDEX_NAME = "index";
 export const INIT_NAME = "init";
@@ -52,6 +49,7 @@ export const DEFAULT_PROJECT_OPTIONS: ProjectOptions = {
 	logTruthyChanges: false,
 	writeOnlyChanged: false,
 	writeTransformedFiles: false,
-	optimizedLoops: false,
+	optimizedLoops: true,
 	allowCommentDirectives: false,
+	luau: true,
 };

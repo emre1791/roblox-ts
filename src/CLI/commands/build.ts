@@ -17,7 +17,7 @@ import { ProjectOptions } from "Shared/types";
 import { getRootDirs } from "Shared/util/getRootDirs";
 import { hasErrors } from "Shared/util/hasErrors";
 import ts from "typescript";
-import yargs from "yargs";
+import type yargs from "yargs";
 
 function getTsConfigProjectOptions(tsConfigPath?: string): Partial<ProjectOptions> | undefined {
 	if (tsConfigPath !== undefined) {
@@ -46,14 +46,13 @@ interface BuildFlags {
 /**
  * Defines the behavior for the `rbxtsc build` command.
  */
-// eslint-disable-next-line @typescript-eslint/ban-types
-export = ts.identity<yargs.CommandModule<{}, BuildFlags & Partial<ProjectOptions>>>({
+export = ts.identity<yargs.CommandModule<object, BuildFlags & Partial<ProjectOptions>>>({
 	command: ["$0", "build"],
 
 	describe: "Build a project",
 
-	builder: () =>
-		yargs
+	builder: (parser: yargs.Argv) =>
+		parser
 			.option("project", {
 				alias: "p",
 				string: true,
@@ -112,6 +111,10 @@ export = ts.identity<yargs.CommandModule<{}, BuildFlags & Partial<ProjectOptions
 			.option("allowCommentDirectives", {
 				boolean: true,
 				hidden: true,
+			})
+			.option("luau", {
+				boolean: true,
+				describe: "emit files with .luau extension",
 			}),
 
 	handler: async argv => {
@@ -135,7 +138,7 @@ export = ts.identity<yargs.CommandModule<{}, BuildFlags & Partial<ProjectOptions
 				setupProjectWatchProgram(data, projectOptions.usePolling);
 			} else {
 				const program = createProjectProgram(data);
-				const pathTranslator = createPathTranslator(program);
+				const pathTranslator = createPathTranslator(program, data);
 				cleanup(pathTranslator);
 				copyInclude(data);
 				copyFiles(data, pathTranslator, new Set(getRootDirs(program.getCompilerOptions())));
